@@ -38,6 +38,15 @@ operations). It pairs directly with the Prometheus/Grafana monitoring stack in m
 
 ![Anomaly detection](anomaly-detection.png)
 
+### Validated on live data
+
+Run against my homelab's **live Grafana Cloud metrics**, the detector correctly
+flagged a real CPU spike from a load test. The straight segments are genuine data
+gaps (the VM was powered off for part of the window) — this is real production-style
+telemetry, not a demo:
+
+![Live anomaly detection](anomaly-live.png)
+
 ## Run it
 
 ```bash
