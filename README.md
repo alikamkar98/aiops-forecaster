@@ -28,12 +28,23 @@ operations). It pairs directly with the Prometheus/Grafana monitoring stack in m
 - **Anomaly detection** — flags samples whose residual from the trend exceeds 3σ.
 - **Dark-themed chart** — history + forecast + threshold + predicted crossing + anomalies.
 
+## Two models
+
+**1. Disk-capacity forecasting** (`forecast_disk.py`) — trend + time-to-threshold.
+
+**2. CPU/memory anomaly detection** (`detect_anomalies.py`) — an unsupervised
+**IsolationForest** learns each metric's normal behaviour and flags outliers
+(sudden spikes and abnormal levels). Features are the value plus its rate of change.
+
+![Anomaly detection](anomaly-detection.png)
+
 ## Run it
 
 ```bash
 pip install -r requirements.txt
-python forecast_disk.py                 # runs on a representative demo series
-python forecast_disk.py --threshold 90  # custom threshold
+python forecast_disk.py                  # disk forecast (demo series)
+python detect_anomalies.py               # CPU/memory anomaly detection (demo series)
+python forecast_disk.py --threshold 90   # custom threshold
 ```
 
 Example output:
