@@ -46,15 +46,16 @@ def demo_data(hours=24, step_min=5, seed=11):
     for c in (int(n*0.35), int(n*0.7)):
         cpu[c:c+3] += rng.uniform(45, 70)                  # CPU spikes
     mem[int(n*0.55):int(n*0.55)+4] += 18                   # a memory blip
-    return dates, {"CPU %": cpu, "Memory %": mem}
+    return {"CPU %": (dates, cpu), "Memory %": (dates, mem)}   # per-metric (dates, values)
 
 
 def query_prometheus(hours):
+    """Returns {name: (dates, values)} — each metric keeps its own timestamps."""
     import requests
     base = os.environ["GRAFANA_PROM_URL"].rstrip("/") + "/api/v1/query_range"
     user, token = os.environ["GRAFANA_PROM_USER"], os.environ["GRAFANA_PROM_TOKEN"]
     end = datetime.now(); start = end - timedelta(hours=hours)
-    series, dates = {}, None
+    data = {}
     for name, promql in PROMQL.items():
         r = requests.get(base, auth=(user, token), params={
             "query": promql, "start": start.timestamp(), "end": end.timestamp(), "step": "300"})
@@ -63,9 +64,10 @@ def query_prometheus(hours):
         if not res:
             raise SystemExit(f"No data for '{name}'. Check the endpoint/token/time range.")
         vals = res[0]["values"]
-        dates = np.array([datetime.fromtimestamp(float(ts)) for ts, _ in vals])
-        series[name] = np.array([float(v) for _, v in vals])
-    return dates, series
+        d = np.array([datetime.fromtimestamp(float(ts)) for ts, _ in vals])
+        v = np.array([float(x) for _, x in vals])
+        data[name] = (d, v)
+    return data
 
 
 def detect(values):
@@ -76,26 +78,26 @@ def detect(values):
     return model.fit_predict(X) == -1
 
 
-def render(dates, series, out_png):
+def render(data, out_png, title):
     plt.rcParams.update({"figure.facecolor": BG, "axes.facecolor": PANEL, "text.color": INK,
                          "axes.labelcolor": MUTED, "xtick.color": MUTED, "ytick.color": MUTED,
                          "axes.edgecolor": GRID, "font.family": "DejaVu Sans"})
-    names = list(series.keys())
-    fig, axes = plt.subplots(len(names), 1, figsize=(10, 6), dpi=130, sharex=True)
+    names = list(data.keys())
+    fig, axes = plt.subplots(len(names), 1, figsize=(10, 6), dpi=130)
+    if len(names) == 1: axes = [axes]
     colors = [CYAN, VIOLET]
     total = 0
     for ax, name, col in zip(axes, names, colors):
-        vals = series[name]; mask = detect(vals); total += int(mask.sum())
+        dates, vals = data[name]; mask = detect(vals); total += int(mask.sum())
         ax.plot(dates, vals, color=col, lw=1.8, label=name)
         if mask.any():
-            ax.scatter(np.array(dates)[mask], vals[mask], color=AMBER, s=45,
+            ax.scatter(dates[mask], vals[mask], color=AMBER, s=45,
                        zorder=5, edgecolor=BG, label="Anomaly")
         ax.set_ylabel(name); ax.grid(True, color=GRID, lw=0.6, alpha=0.6)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%d %b %H:%M"))
         leg = ax.legend(loc="upper left", framealpha=0.15, facecolor=PANEL, edgecolor=GRID, fontsize=9)
         for t in leg.get_texts(): t.set_color(INK)
-    axes[0].set_title("Live anomaly detection — CPU & memory (IsolationForest)",
-                      color=INK, fontsize=15, fontweight="bold", loc="left")
-    axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+    axes[0].set_title(title, color=INK, fontsize=15, fontweight="bold", loc="left")
     fig.tight_layout(); fig.savefig(out_png, facecolor=BG)
     print(f"Chart written to {out_png}  |  anomalies flagged: {total}")
 
@@ -106,15 +108,17 @@ def main():
     ap.add_argument("--hours", type=int, default=24)
     ap.add_argument("--out", default="anomaly-detection.png")
     args = ap.parse_args()
-    dates, series = (query_prometheus(args.hours) if args.source == "prometheus"
-                     else demo_data(args.hours))
+    data = (query_prometheus(args.hours) if args.source == "prometheus"
+            else demo_data(args.hours))
     print("=" * 60)
     print(f"Anomaly detection  (source: {args.source})")
-    for name, vals in series.items():
+    for name, (dates, vals) in data.items():
         m = detect(vals)
         print(f"  {name:9s}: {int(m.sum())} anomalies  (latest {vals[-1]:.1f})")
     print("=" * 60)
-    render(dates, series, args.out)
+    title = ("Live anomaly detection — CPU & memory (IsolationForest)" if args.source == "prometheus"
+             else "Anomaly detection — CPU & memory (IsolationForest)")
+    render(data, args.out, title)
 
 
 if __name__ == "__main__":
